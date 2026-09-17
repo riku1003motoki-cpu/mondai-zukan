@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#2563eb" />
+    <title>問題図鑑</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <noscript>このアプリを使うには JavaScript を有効にしてください。</noscript>
+    <header class="app-header">
+      <a class="brand" href="#/" aria-label="問題一覧へ">問題図鑑</a>
+      <span id="headerMessage" class="header-message" aria-live="polite"></span>
+      <button id="authButton" class="header-auth" type="button">同期を設定</button>
+    </header>
+    <main id="app" class="app-shell"></main>
+    <input id="importInput" type="file" accept="application/json,.json" hidden />
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
