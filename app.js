@@ -64,9 +64,11 @@ function renderEditor(problem) {
   <div class="field"><label>年度・月</label><select name="collection">${COLLECTIONS.map(collection => `<option value="${esc(collection)}" ${collection===problem.collection?"selected":""}>${esc(collection)}</option>`).join("")}${!COLLECTIONS.includes(problem.collection)?`<option value="${esc(problem.collection)}" selected>${esc(problem.collection)}</option>`:""}</select></div><div class="field"><label>問題番号・表示名</label><input name="number" type="text" required placeholder="例：20-1、20-2、練習A" value="${esc(problem.number)}"><span class="field-hint">数字以外も使えます。問題20の(1)と(2)なら「20-1」「20-2」のように入力します。</span></div><div class="field"><label>状態</label><select name="status">${Object.entries(STATES).map(([key,[label]])=>`<option value="${key}" ${key===problem.status?"selected":""}>${label}</option>`).join("")}</select></div>
   ${field("問題文", "question", problem.question, false)}${field("正解", "answer", problem.answer, false)}${field("詳しい解説", "explanation", problem.explanation, true, "# 見出し / - 箇条書き も使えます。長文をそのまま貼り付けてOKです。")}${field("間違えやすいポイント", "pitfalls", problem.pitfalls, false)}${field("覚えるべきポイント", "keyPoints", problem.keyPoints, false)}${field("キーワード", "keywords", problem.keywords, false, "例：動詞、現在完了、図形")}
   <div class="field"><label>問題画像</label><input id="imageUrl" name="image" type="url" placeholder="画像のURL（任意）" value="${esc(problem.image)}"><input id="imageFile" type="file" accept="image/*"><span class="field-hint">公開画像のURLを貼るか、端末の画像を1枚選びます。同じページの画像を複数問題に使うこともできます。</span>${problem.image?`<img id="imagePreview" class="image-preview" src="${esc(problem.image)}" alt="現在の問題画像">`:""}</div>
+  <div class="field"><button class="button" type="button" id="generateAi">✨ AIで解説を作成して保存</button><span id="aiStatus" class="field-hint">問題文または問題画像をもとに、正解・解説・ポイントを自動入力します。</span></div>
   <div class="editor-actions"><button class="button primary" type="submit">保存する</button><button class="button danger" type="button" id="delete">この問題を削除</button></div></form>`;
   document.querySelector("#editor").onsubmit = event => { event.preventDefault(); const v=Object.fromEntries(new FormData(event.currentTarget)); delete v.imageFile; const number=String(v.number).trim(); if (!number) return alert("問題番号・表示名を入力してください。"); if (data.problems.some(p => String(p.number)===number && p.collection===v.collection && p.id!==problem.id)) return alert("同じ年度・月に、同じ問題番号・表示名がすでにあります。"); Object.assign(problem, {...v, number, updatedAt:new Date().toISOString()}); activeCollection = problem.collection; saveData(); location.hash=`#/problem/${problem.id}`; };
   document.querySelector("#imageFile").onchange = event => { const file = event.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => { document.querySelector("#imageUrl").value = reader.result; let preview = document.querySelector("#imagePreview"); if (!preview) { preview = document.createElement("img"); preview.id = "imagePreview"; preview.className = "image-preview"; preview.alt = "選択した問題画像"; event.target.closest(".field").append(preview); } preview.src = reader.result; }; reader.readAsDataURL(file); };
+  document.querySelector("#generateAi").onclick = () => generateExplanation();
   document.querySelector("#delete").onclick = () => { if (confirm(`問題 ${problem.number} を削除しますか？`)) { data.problems=data.problems.filter(p=>p.id!==problem.id); saveData("問題を削除しました"); location.hash="#/"; } };
 }
 function field(label, name, value, long=false, hint="") { return `<div class="field"><label for="${name}">${label}</label><textarea id="${name}" name="${name}" class="${long?"long":""}" placeholder="${label}を入力">${esc(value)}</textarea>${hint?`<span class="field-hint">${hint}</span>`:""}</div>`; }
@@ -75,6 +77,29 @@ function exportData() { const blob=new Blob([JSON.stringify(data,null,2)],{type:
 importInput.addEventListener("change", async () => { const file=importInput.files[0]; if(!file) return; try { const imported=JSON.parse(await file.text()); if(!Array.isArray(imported.problems)) throw new Error(); if(!confirm(`${imported.problems.length}件のデータで現在のデータを置き換えますか？`)) return; data={version:1,problems:imported.problems}; saveData("データを読み込みました"); location.hash="#/"; } catch { alert("正しい問題図鑑のJSONファイルを選択してください。"); } finally { importInput.value=""; } });
 function render() { const r=route(); r.page==="detail" ? renderDetail(problemById(r.id)) : renderList(); }
 window.addEventListener("hashchange", render); render();
+
+async function generateExplanation() {
+  const image = document.querySelector("#imageUrl").value.trim();
+  const question = document.querySelector("#question").value.trim();
+  const status = document.querySelector("#aiStatus");
+  if (!image && !question) return alert("問題文を入力するか、問題画像を選んでください。");
+  if (!confirm("問題文・問題画像をOpenAI APIへ送信して解説を作成します。API利用料金が発生する場合があります。続けますか？")) return;
+  status.textContent = "AIが解説を作成しています。少し待ってください…";
+  document.querySelector("#generateAi").disabled = true;
+  try {
+    const { data: result, error } = await supabase.functions.invoke("generate-explanation", { body: { image, question } });
+    if (error) throw error;
+    if (!result?.explanation) throw new Error("AIから解説を受け取れませんでした。");
+    for (const key of ["question", "answer", "explanation", "pitfalls", "keyPoints", "keywords"]) {
+      if (result[key]) document.querySelector(`#${key}`).value = Array.isArray(result[key]) ? result[key].map(item => `- ${item}`).join("\n") : result[key];
+    }
+    if (document.querySelector("[name=status]").value === "unanswered") document.querySelector("[name=status]").value = "explained";
+    status.textContent = "作成しました。内容を確認してから「保存する」を押してください。";
+  } catch (error) {
+    console.error(error);
+    status.textContent = "作成できませんでした。OpenAIキーとEdge Functionの設定を確認してください。";
+  } finally { document.querySelector("#generateAi").disabled = false; }
+}
 
 /* ---- クラウド同期とログイン ---- */
 function refreshAuthButton() { const button = document.querySelector("#authButton"); if (!button) return; button.textContent = currentUser ? "☁ 同期中" : "☁ 同期を設定"; button.onclick = currentUser ? signOut : showAuthDialog; }
@@ -99,3 +124,4 @@ function showAuthDialog() {
 async function signOut() { await supabase.auth.signOut(); currentUser = null; refreshAuthButton(); flash("この端末からログアウトしました"); }
 async function initializeSync() { const { data: { session } } = await supabase.auth.getSession(); currentUser = session?.user ?? null; refreshAuthButton(); if (currentUser) loadFromCloud(); supabase.auth.onAuthStateChange((_event, session) => { const wasLoggedIn = Boolean(currentUser); currentUser = session?.user ?? null; refreshAuthButton(); if (currentUser && !wasLoggedIn) { closeAuthDialog(); loadFromCloud(); } }); }
 initializeSync();
+
