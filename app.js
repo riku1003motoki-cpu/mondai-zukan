@@ -54,8 +54,11 @@ function renderDetail(problem) {
   if (!problem) { location.hash = "#/"; return; }
   const ordered = data.problems.filter(p => p.collection === problem.collection).sort(compareProblems); const index = ordered.findIndex(p => p.id === problem.id); const prev=ordered[index-1], next=ordered[index+1];
   const section = (title, value) => `<section class="detail-section"><h2>${title}</h2><div class="content-box">${renderText(value)}</div></section>`;
-  app.innerHTML = `<div class="nav-row"><button class="button" ${!prev?"disabled":""} id="prev">← 前の問題</button><a class="button" href="#/">問題一覧</a><button class="button" ${!next?"disabled":""} id="next">次の問題 →</button></div><article class="panel"><div class="detail-top"><div><span class="state-mark">${esc(problem.collection)}</span><h1>問題 ${formatNumber(problem.number)}</h1><span class="state-mark">${STATES[problem.status][1]} ${STATES[problem.status][0]}</span></div><button class="button primary" id="edit">編集する</button></div>${section("問題文",problem.question)}${problem.image?`<section class="detail-section"><h2>問題画像</h2><img class="problem-image" src="${esc(problem.image)}" alt="問題 ${problem.number} の画像"></section>`:""}${section("正解",problem.answer)}${section("詳しい解説",problem.explanation)}${section("間違えやすいポイント",problem.pitfalls)}${section("覚えるべきポイント",problem.keyPoints)}${section("キーワード",problem.keywords)}</article>`;
+  const chat = problem.chatHistory ?? [];
+  const chatHtml = chat.length ? chat.map(item => `<div class="chat-message ${item.role === "user" ? "chat-user" : "chat-ai"}"><strong>${item.role === "user" ? "あなた" : "AI"}</strong><div>${renderText(item.content)}</div></div>`).join("") : `<p class="help">例：「この式変形が分からない」「なぜこの選択肢は違うの？」</p>`;
+  app.innerHTML = `<div class="nav-row"><button class="button" ${!prev?"disabled":""} id="prev">← 前の問題</button><a class="button" href="#/">問題一覧</a><button class="button" ${!next?"disabled":""} id="next">次の問題 →</button></div><article class="panel"><div class="detail-top"><div><span class="state-mark">${esc(problem.collection)}</span><h1>問題 ${formatNumber(problem.number)}</h1><span class="state-mark">${STATES[problem.status][1]} ${STATES[problem.status][0]}</span></div><button class="button primary" id="edit">編集する</button></div>${section("問題文",problem.question)}${problem.image?`<section class="detail-section"><h2>問題画像</h2><img class="problem-image" src="${esc(problem.image)}" alt="問題 ${problem.number} の画像"></section>`:""}${section("正解",problem.answer)}${section("詳しい解説",problem.explanation)}${section("間違えやすいポイント",problem.pitfalls)}${section("覚えるべきポイント",problem.keyPoints)}${section("キーワード",problem.keywords)}<section class="detail-section"><h2>AIに質問する</h2><div class="content-box chat-box">${chatHtml}</div><div class="field"><textarea id="chatInput" placeholder="この問題について質問する"></textarea><button class="button primary" id="sendChat">質問を送る</button><span class="field-hint">問題文・画像・保存済み解説を踏まえて回答します。質問履歴はこの問題だけに保存されます。</span></div></section></article>`;
   document.querySelector("#edit").onclick = () => renderEditor(problem);
+  document.querySelector("#sendChat").onclick = () => sendQuestionChat(problem);
   if(prev) document.querySelector("#prev").onclick = () => location.hash=`#/problem/${prev.id}`; if(next) document.querySelector("#next").onclick = () => location.hash=`#/problem/${next.id}`;
 }
 
@@ -99,6 +102,31 @@ async function generateExplanation() {
     console.error(error);
     status.textContent = "作成できませんでした。OpenAIキーとEdge Functionの設定を確認してください。";
   } finally { document.querySelector("#generateAi").disabled = false; }
+}
+
+async function sendQuestionChat(problem) {
+  if (!currentUser) return alert("AI質問を使うには、右上の「同期を設定」からログインが必要です。OpenAI APIの利用を本人だけに限定するためです。");
+  const input = document.querySelector("#chatInput");
+  const question = input.value.trim();
+  if (!question) return;
+  problem.chatHistory ??= [];
+  problem.chatHistory.push({ role: "user", content: question, createdAt: new Date().toISOString() });
+  saveData("AIが回答を作成しています…");
+  renderDetail(problem);
+  try {
+    const { data: result, error } = await supabase.functions.invoke("question-chat", {
+      body: { problem: { question: problem.question, image: problem.image, answer: problem.answer, explanation: problem.explanation, pitfalls: problem.pitfalls, keyPoints: problem.keyPoints }, history: problem.chatHistory.slice(-10) },
+    });
+    if (error) throw error;
+    if (!result?.answer) throw new Error("AIから回答を受け取れませんでした。");
+    problem.chatHistory.push({ role: "assistant", content: result.answer, createdAt: new Date().toISOString() });
+    saveData("AIの回答を保存しました");
+  } catch (error) {
+    console.error(error);
+    problem.chatHistory.push({ role: "assistant", content: "回答を作成できませんでした。AI設定とログイン状態を確認してください。", createdAt: new Date().toISOString() });
+    saveData("AI質問に失敗しました");
+  }
+  renderDetail(problem);
 }
 
 /* ---- クラウド同期とログイン ---- */
