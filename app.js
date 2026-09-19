@@ -54,11 +54,8 @@ function renderDetail(problem) {
   if (!problem) { location.hash = "#/"; return; }
   const ordered = data.problems.filter(p => p.collection === problem.collection).sort(compareProblems); const index = ordered.findIndex(p => p.id === problem.id); const prev=ordered[index-1], next=ordered[index+1];
   const section = (title, value) => `<section class="detail-section"><h2>${title}</h2><div class="content-box">${renderText(value)}</div></section>`;
-  const chat = problem.chatHistory ?? [];
-  const chatHtml = chat.length ? chat.map(item => `<div class="chat-message ${item.role === "user" ? "chat-user" : "chat-ai"}"><strong>${item.role === "user" ? "あなた" : "AI"}</strong><div>${renderText(item.content)}</div></div>`).join("") : `<p class="help">例：「この式変形が分からない」「なぜこの選択肢は違うの？」</p>`;
-  app.innerHTML = `<div class="nav-row"><button class="button" ${!prev?"disabled":""} id="prev">← 前の問題</button><a class="button" href="#/">問題一覧</a><button class="button" ${!next?"disabled":""} id="next">次の問題 →</button></div><article class="panel"><div class="detail-top"><div><span class="state-mark">${esc(problem.collection)}</span><h1>問題 ${formatNumber(problem.number)}</h1><span class="state-mark">${STATES[problem.status][1]} ${STATES[problem.status][0]}</span></div><button class="button primary" id="edit">編集する</button></div>${section("問題文",problem.question)}${problem.image?`<section class="detail-section"><h2>問題画像</h2><img class="problem-image" src="${esc(problem.image)}" alt="問題 ${problem.number} の画像"></section>`:""}${section("正解",problem.answer)}${section("詳しい解説",problem.explanation)}${section("間違えやすいポイント",problem.pitfalls)}${section("覚えるべきポイント",problem.keyPoints)}${section("キーワード",problem.keywords)}<section class="detail-section"><h2>AIに質問する</h2><div class="content-box chat-box">${chatHtml}</div><div class="field"><textarea id="chatInput" placeholder="この問題について質問する"></textarea><button class="button primary" id="sendChat">質問を送る</button><span class="field-hint">問題文・画像・保存済み解説を踏まえて回答します。質問履歴はこの問題だけに保存されます。</span></div></section></article>`;
+  app.innerHTML = `<div class="nav-row"><button class="button" ${!prev?"disabled":""} id="prev">← 前の問題</button><a class="button" href="#/">問題一覧</a><button class="button" ${!next?"disabled":""} id="next">次の問題 →</button></div><article class="panel"><div class="detail-top"><div><span class="state-mark">${esc(problem.collection)}</span><h1>問題 ${formatNumber(problem.number)}</h1><span class="state-mark">${STATES[problem.status][1]} ${STATES[problem.status][0]}</span></div><button class="button primary" id="edit">編集する</button></div>${section("問題文",problem.question)}${problem.image?`<section class="detail-section"><h2>問題画像</h2><img class="problem-image" src="${esc(problem.image)}" alt="問題 ${problem.number} の画像"></section>`:""}${section("正解",problem.answer)}${section("詳しい解説",problem.explanation)}${section("間違えやすいポイント",problem.pitfalls)}${section("覚えるべきポイント",problem.keyPoints)}${section("キーワード",problem.keywords)}</article>`;
   document.querySelector("#edit").onclick = () => renderEditor(problem);
-  document.querySelector("#sendChat").onclick = () => sendQuestionChat(problem);
   if(prev) document.querySelector("#prev").onclick = () => location.hash=`#/problem/${prev.id}`; if(next) document.querySelector("#next").onclick = () => location.hash=`#/problem/${next.id}`;
 }
 
@@ -67,12 +64,10 @@ function renderEditor(problem) {
   <div class="field"><label>年度・月</label><select name="collection">${COLLECTIONS.map(collection => `<option value="${esc(collection)}" ${collection===problem.collection?"selected":""}>${esc(collection)}</option>`).join("")}${!COLLECTIONS.includes(problem.collection)?`<option value="${esc(problem.collection)}" selected>${esc(problem.collection)}</option>`:""}</select></div><div class="field"><label>問題番号・表示名</label><input name="number" type="text" required placeholder="例：20-1、20-2、練習A" value="${esc(problem.number)}"><span class="field-hint">数字以外も使えます。問題20の(1)と(2)なら「20-1」「20-2」のように入力します。</span></div><div class="field"><label>状態</label><select name="status">${Object.entries(STATES).map(([key,[label]])=>`<option value="${key}" ${key===problem.status?"selected":""}>${label}</option>`).join("")}</select></div>
   ${field("問題文", "question", problem.question, false)}${field("正解", "answer", problem.answer, false)}${field("詳しい解説", "explanation", problem.explanation, true, "# 見出し / - 箇条書き も使えます。長文をそのまま貼り付けてOKです。")}${field("間違えやすいポイント", "pitfalls", problem.pitfalls, false)}${field("覚えるべきポイント", "keyPoints", problem.keyPoints, false)}${field("キーワード", "keywords", problem.keywords, false, "例：動詞、現在完了、図形")}
   <div class="field"><label>問題画像</label><input id="imageUrl" name="image" type="url" placeholder="画像のURL（任意）" value="${esc(problem.image)}"><input id="imageFile" type="file" accept="image/*"><span class="field-hint">公開画像のURLを貼るか、端末の画像を1枚選びます。同じページの画像を複数問題に使うこともできます。</span>${problem.image?`<img id="imagePreview" class="image-preview" src="${esc(problem.image)}" alt="現在の問題画像">`:""}</div>
-  <div class="field"><button class="button" type="button" id="generateAi">✨ AIで解説を作成して保存</button><span id="aiStatus" class="field-hint">問題文または問題画像をもとに、正解・解説・ポイントを自動入力します。</span></div>
   <div class="editor-actions"><button class="button primary" type="submit">保存する</button><button class="button danger" type="button" id="delete">この問題を削除</button></div></form>`;
   document.querySelector("#cancelEdit").onclick = () => renderDetail(problem);
   document.querySelector("#editor").onsubmit = event => { event.preventDefault(); const v=Object.fromEntries(new FormData(event.currentTarget)); delete v.imageFile; const number=String(v.number).trim(); if (!number) return alert("問題番号・表示名を入力してください。"); if (data.problems.some(p => String(p.number)===number && p.collection===v.collection && p.id!==problem.id)) return alert("同じ年度・月に、同じ問題番号・表示名がすでにあります。"); Object.assign(problem, {...v, number, updatedAt:new Date().toISOString()}); activeCollection = problem.collection; saveData(); renderDetail(problem); };
   document.querySelector("#imageFile").onchange = event => { const file = event.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => { document.querySelector("#imageUrl").value = reader.result; let preview = document.querySelector("#imagePreview"); if (!preview) { preview = document.createElement("img"); preview.id = "imagePreview"; preview.className = "image-preview"; preview.alt = "選択した問題画像"; event.target.closest(".field").append(preview); } preview.src = reader.result; }; reader.readAsDataURL(file); };
-  document.querySelector("#generateAi").onclick = () => generateExplanation();
   document.querySelector("#delete").onclick = () => { if (confirm(`問題 ${problem.number} を削除しますか？`)) { data.problems=data.problems.filter(p=>p.id!==problem.id); saveData("問題を削除しました"); location.hash="#/"; } };
 }
 function field(label, name, value, long=false, hint="") { return `<div class="field"><label for="${name}">${label}</label><textarea id="${name}" name="${name}" class="${long?"long":""}" placeholder="${label}を入力">${esc(value)}</textarea>${hint?`<span class="field-hint">${hint}</span>`:""}</div>`; }
@@ -82,53 +77,6 @@ importInput.addEventListener("change", async () => { const file=importInput.file
 function render() { const r=route(); r.page==="detail" ? renderDetail(problemById(r.id)) : renderList(); }
 window.addEventListener("hashchange", render); render();
 
-async function generateExplanation() {
-  const image = document.querySelector("#imageUrl").value.trim();
-  const question = document.querySelector("#question").value.trim();
-  const status = document.querySelector("#aiStatus");
-  if (!image && !question) return alert("問題文を入力するか、問題画像を選んでください。");
-  if (!confirm("問題文・問題画像をOpenAI APIへ送信して解説を作成します。API利用料金が発生する場合があります。続けますか？")) return;
-  status.textContent = "AIが解説を作成しています。少し待ってください…";
-  document.querySelector("#generateAi").disabled = true;
-  try {
-    const { data: result, error } = await supabase.functions.invoke("generate-explanation", { body: { image, question } });
-    if (error) throw error;
-    if (!result?.explanation) throw new Error("AIから解説を受け取れませんでした。");
-    for (const key of ["question", "answer", "explanation", "pitfalls", "keyPoints", "keywords"]) {
-      if (result[key]) document.querySelector(`#${key}`).value = Array.isArray(result[key]) ? result[key].map(item => `- ${item}`).join("\n") : result[key];
-    }
-    if (document.querySelector("[name=status]").value === "unanswered") document.querySelector("[name=status]").value = "explained";
-    status.textContent = "作成しました。内容を確認してから「保存する」を押してください。";
-  } catch (error) {
-    console.error(error);
-    status.textContent = "作成できませんでした。OpenAIキーとEdge Functionの設定を確認してください。";
-  } finally { document.querySelector("#generateAi").disabled = false; }
-}
-
-async function sendQuestionChat(problem) {
-  if (!currentUser) return alert("AI質問を使うには、右上の「同期を設定」からログインが必要です。OpenAI APIの利用を本人だけに限定するためです。");
-  const input = document.querySelector("#chatInput");
-  const question = input.value.trim();
-  if (!question) return;
-  problem.chatHistory ??= [];
-  problem.chatHistory.push({ role: "user", content: question, createdAt: new Date().toISOString() });
-  saveData("AIが回答を作成しています…");
-  renderDetail(problem);
-  try {
-    const { data: result, error } = await supabase.functions.invoke("question-chat", {
-      body: { problem: { question: problem.question, image: problem.image, answer: problem.answer, explanation: problem.explanation, pitfalls: problem.pitfalls, keyPoints: problem.keyPoints }, history: problem.chatHistory.slice(-10) },
-    });
-    if (error) throw error;
-    if (!result?.answer) throw new Error("AIから回答を受け取れませんでした。");
-    problem.chatHistory.push({ role: "assistant", content: result.answer, createdAt: new Date().toISOString() });
-    saveData("AIの回答を保存しました");
-  } catch (error) {
-    console.error(error);
-    problem.chatHistory.push({ role: "assistant", content: "回答を作成できませんでした。AI設定とログイン状態を確認してください。", createdAt: new Date().toISOString() });
-    saveData("AI質問に失敗しました");
-  }
-  renderDetail(problem);
-}
 
 /* ---- クラウド同期とログイン ---- */
 function refreshAuthButton() { const button = document.querySelector("#authButton"); if (!button) return; button.textContent = currentUser ? "☁ 同期中" : "☁ 同期を設定"; button.onclick = currentUser ? signOut : showAuthDialog; }
